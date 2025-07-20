@@ -1,5 +1,4 @@
-// src/api.ts
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000/api";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 export interface Task {
   id: number;
@@ -43,9 +42,10 @@ async function apiRequest<T>(
   return res.json() as Promise<T>;
 }
 
-export function listTasks(token: string) {
-  return apiRequest<TaskListResponse>("/tasks/", {}, token);
+export function listTasks(token: string, query: string = "") {
+  return apiRequest<TaskListResponse>(`/tasks/${query}`, {}, token);
 }
+
 
 export function createTask(
   token: string,
@@ -118,4 +118,34 @@ export async function updateTaskCompletion(
     throw new Error("Falha ao atualizar tarefa: " + txt);
   }
   return res.json() as Promise<import("./api").Task>;
+}
+
+export async function deleteTask(token: string, id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/tasks/${id}/`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (res.status === 204) return;
+  const txt = await res.text();
+  throw new Error("Erro ao deletar: " + txt);
+}
+
+export async function updateTask(
+  token: string,
+  id: number,
+  data: Partial<Pick<Task, "title" | "description" | "is_completed">>
+): Promise<Task> {
+  const res = await fetch(`${API_BASE}/tasks/${id}/`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error("Erro ao atualizar: " + txt);
+  }
+  return res.json();
 }

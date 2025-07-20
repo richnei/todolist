@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react";
-import { listTasks, createTask, login, register, updateTaskCompletion } from "./api";
 import type { Task } from "./api";
+import {
+  listTasks,
+  createTask,
+  login,
+  register,
+  updateTaskCompletion,
+  deleteTask,
+  updateTask
+} from "./api";
 
 
 interface StatusMessage {
@@ -10,24 +18,26 @@ interface StatusMessage {
 
 function App() {
   const [accessToken, setAccessToken] = useState<string | null>(() => localStorage.getItem("access") || null);
-  const [refreshToken, setRefreshToken] = useState<string | null>(() => localStorage.getItem("refresh") || null);
+  const [_refreshToken, setRefreshToken] = useState<string | null>(() => localStorage.getItem("refresh") || null);
 
-  // Modo de tela inicial: login ou register
   const [mode, setMode] = useState<"login" | "register">("login");
 
-  // Login/Register form states
+  const [filter, setFilter] = useState<"all" | "done" | "pending">("all");
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Tarefas
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<StatusMessage | null>(null);
 
-  // Criar tarefa
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const pageSize = 10;
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
 
@@ -72,12 +82,19 @@ function App() {
     }
   }
 
-  async function loadTasks() {
+  async function loadTasks(page: number = 1) {
     if (!accessToken) return;
     setTasksLoading(true);
     try {
-      const data = await listTasks(accessToken);
+      const params = new URLSearchParams();
+      if (filter === "done") params.append("is_completed", "true");
+      if (filter === "pending") params.append("is_completed", "false");
+      params.append("page", String(page));
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const data = await listTasks(accessToken, qs);
       setTasks(data.results);
+      setCurrentPage(page);
+      setTotalCount(data.count);
     } catch (e: any) {
       setStatusMsg({ type: "error", text: e.message });
     } finally {
@@ -114,6 +131,45 @@ function App() {
     }
   }
 
+    async function handleDelete(task: Task) {
+    if (!accessToken) return;
+    if (!confirm("Deseja realmente excluir esta tarefa?")) return;
+    try {
+      await deleteTask(accessToken, task.id);
+      setTasks(prev => prev.filter(t => t.id !== task.id));
+      setStatusMsg({ type: "info", text: "Tarefa excluída." });
+
+      if (tasks.length === 1 && currentPage > 1) {
+        loadTasks(currentPage - 1);
+      }
+    } catch (e: any) {
+      setStatusMsg({ type: "error", text: e.message });
+    }
+  }
+
+  async function handleEdit(task: Task) {
+    if (!accessToken) return;
+
+    const novoTitulo = prompt("Novo título:", task.title);
+    if (novoTitulo === null) return; 
+    const novoDesc = prompt("Nova descrição (deixe vazio para remover):", task.description || "");
+    if (novoTitulo.trim() === "") {
+      setStatusMsg({ type: "error", text: "Título não pode ser vazio." });
+      return;
+    }
+
+    try {
+      const updated = await updateTask(accessToken, task.id, {
+        title: novoTitulo,
+        description: novoDesc || ""
+      });
+      setTasks(prev => prev.map(t => (t.id === task.id ? updated : t)));
+      setStatusMsg({ type: "info", text: "Tarefa atualizada." });
+    } catch (e: any) {
+      setStatusMsg({ type: "error", text: e.message });
+    }
+  }
+
 
   function handleLogout() {
     setAccessToken(null);
@@ -125,10 +181,9 @@ function App() {
   }
 
   useEffect(() => {
-    if (accessToken) loadTasks();
-  }, [accessToken]);
+    if (accessToken) loadTasks(1); // sempre volta para página 1 quando filtro muda
+  }, [accessToken, filter]);
 
-  // --------- Tela inicial (login / register) ----------
   if (!accessToken) {
     const isLogin = mode === "login";
     return (
@@ -144,11 +199,7 @@ function App() {
             </div>
           </div>
 
-          <form
-            className="login-form"
-            onSubmit={isLogin ? handleLogin : handleRegister}
-            autoComplete="on"
-          >
+          <form className="login-form" onSubmit={isLogin ? handleLogin : handleRegister} autoComplete="on">
             <div className="field-group">
               <label>Usuário</label>
               <input
@@ -208,7 +259,6 @@ function App() {
                   setFormError(null);
                   setPassword("");
                   setEmail("");
-                  // alterna modo
                   setMode(isLogin ? "register" : "login");
                 }}
                 style={{ minWidth: 140, justifyContent: "center" }}
@@ -228,13 +278,13 @@ function App() {
     );
   }
 
-  // --------- App logado ----------
+  // App logado
   return (
     <div style={{ maxWidth: 880, margin: "42px auto", padding: "0 24px" }} className="fade-in">
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div className="brand-dot" />
-          <h1 style={{ fontSize: 26, margin: 0 }}>To‑Do Manager</h1>
+            <h1 style={{ fontSize: 26, margin: 0 }}>To‑Do Manager</h1>
         </div>
         <button onClick={handleLogout} className="outline">
           Sair
@@ -315,6 +365,33 @@ function App() {
           Tarefas {tasksLoading && <span style={{ fontSize: 12, color: "var(--text-dim)" }}>(carregando...)</span>}
         </h2>
 
+        {/* Filtros */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
+          {[
+            { key: "all", label: "Todas" },
+            { key: "pending", label: "Pendentes" },
+            { key: "done", label: "Concluídas" },
+          ].map(btn => (
+            <button
+              key={btn.key}
+              onClick={() => setFilter(btn.key as any)}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 20,
+                border: "1px solid var(--border)",
+                background: filter === btn.key ? "var(--accent)" : "var(--bg-alt)",
+                color: filter === btn.key ? "#fff" : "var(--text-dim)",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 500,
+                letterSpacing: ".5px"
+              }}
+            >
+              {btn.label}
+            </button>
+          ))}
+        </div>
+
         {tasks.length === 0 && !tasksLoading && (
           <p className="muted">Nenhuma tarefa criada ainda.</p>
         )}
@@ -378,8 +455,7 @@ function App() {
                 </div>
               )}
 
-              {/* Botões de ação */}
-              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
                 <button
                   onClick={() => handleToggle(t)}
                   style={{
@@ -394,16 +470,78 @@ function App() {
                 >
                   {t.is_completed ? "Reabrir" : "Concluir"}
                 </button>
-                {/* (Opcional futuro) Botões de editar / deletar podem ir aqui */}
+
+                <button
+                  onClick={() => handleEdit(t)}
+                  style={{
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-alt)",
+                    color: "#89b4ff",
+                    fontSize: 12,
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    cursor: "pointer"
+                  }}
+                >
+                  Editar
+                </button>
+
+                <button
+                  onClick={() => handleDelete(t)}
+                  style={{
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-alt)",
+                    color: "#ff5468",
+                    fontSize: 12,
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    cursor: "pointer"
+                  }}
+                >
+                  Excluir
+                </button>
               </div>
+
 
               <div style={{ fontSize: 11, color: "#6f7a86", marginTop: "auto" }}>
                 Criada: {new Date(t.created_at).toLocaleString()}
               </div>
             </div>
           ))}
-
         </div>
+
+        {/* Paginação */}
+        {totalCount > pageSize && (
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 28 }}>
+            <button
+              disabled={currentPage === 1 || tasksLoading}
+              onClick={() => loadTasks(currentPage - 1)}
+              className="outline"
+              style={{
+                opacity: currentPage === 1 ? 0.4 : 1,
+                padding: "8px 14px",
+                cursor: currentPage === 1 ? "default" : "pointer"
+              }}
+            >
+              ← Anterior
+            </button>
+            <span style={{ fontSize: 13, color: "var(--text-dim)" }}>
+              Página {currentPage} de {Math.ceil(totalCount / pageSize)}
+            </span>
+            <button
+              disabled={currentPage >= Math.ceil(totalCount / pageSize) || tasksLoading}
+              onClick={() => loadTasks(currentPage + 1)}
+              className="outline"
+              style={{
+                opacity: currentPage >= Math.ceil(totalCount / pageSize) ? 0.4 : 1,
+                padding: "8px 14px",
+                cursor: currentPage >= Math.ceil(totalCount / pageSize) ? "default" : "pointer"
+              }}
+            >
+              Próxima →
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );
