@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { listTasks, createTask, login } from "./api";
+import { listTasks, createTask, login, register, updateTaskCompletion } from "./api";
 import type { Task } from "./api";
+
 
 interface StatusMessage {
   type: "error" | "info";
@@ -11,25 +12,29 @@ function App() {
   const [accessToken, setAccessToken] = useState<string | null>(() => localStorage.getItem("access") || null);
   const [refreshToken, setRefreshToken] = useState<string | null>(() => localStorage.getItem("refresh") || null);
 
-  // Login form states
+  // Modo de tela inicial: login ou register
+  const [mode, setMode] = useState<"login" | "register">("login");
+
+  // Login/Register form states
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [formLoading, setFormLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  // Tasks
+  // Tarefas
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<StatusMessage | null>(null);
 
-  // Create Task
+  // Criar tarefa
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
-    setLoginError(null);
-    setLoginLoading(true);
+    setFormError(null);
+    setFormLoading(true);
     try {
       const tokens = await login(username, password);
       setAccessToken(tokens.access);
@@ -40,9 +45,30 @@ function App() {
       setPassword("");
       setStatusMsg({ type: "info", text: "Login realizado." });
     } catch (err: any) {
-      setLoginError(err.message || "Falha ao autenticar");
+      setFormError(err.message || "Falha ao autenticar");
     } finally {
-      setLoginLoading(false);
+      setFormLoading(false);
+    }
+  }
+
+  async function handleRegister(e: React.FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    setFormLoading(true);
+    try {
+      const resp = await register({ username, password, email: email || undefined });
+      setAccessToken(resp.access);
+      setRefreshToken(resp.refresh);
+      localStorage.setItem("access", resp.access);
+      localStorage.setItem("refresh", resp.refresh);
+      setUsername("");
+      setPassword("");
+      setEmail("");
+      setStatusMsg({ type: "info", text: "Conta criada e login efetuado." });
+    } catch (err: any) {
+      setFormError(err.message || "Falha ao registrar");
+    } finally {
+      setFormLoading(false);
     }
   }
 
@@ -74,20 +100,37 @@ function App() {
     }
   }
 
+  async function handleToggle(task: Task) {
+    if (!accessToken) return;
+    try {
+      const updated = await updateTaskCompletion(accessToken, task.id, !task.is_completed);
+      setTasks(prev => prev.map(t => (t.id === task.id ? updated : t)));
+      setStatusMsg({
+        type: "info",
+        text: updated.is_completed ? "Tarefa marcada como concluída." : "Tarefa reaberta."
+      });
+    } catch (e: any) {
+      setStatusMsg({ type: "error", text: e.message });
+    }
+  }
+
+
   function handleLogout() {
     setAccessToken(null);
     setRefreshToken(null);
     localStorage.removeItem("access");
     localStorage.removeItem("refresh");
     setTasks([]);
+    setStatusMsg({ type: "info", text: "Sessão encerrada." });
   }
 
   useEffect(() => {
     if (accessToken) loadTasks();
   }, [accessToken]);
 
-  // --- Login Screen ---
+  // --------- Tela inicial (login / register) ----------
   if (!accessToken) {
+    const isLogin = mode === "login";
     return (
       <div className="login-wrapper">
         <div className="login-card fade-in">
@@ -95,73 +138,97 @@ function App() {
             <div className="brand-dot" />
             <div>
               <h1 style={{ fontSize: 24, margin: 0 }}>To‑Do Manager</h1>
-              <div className="muted" style={{ marginTop: 2 }}>Teste Técnico • Login</div>
+              <div className="muted" style={{ marginTop: 2 }}>
+                Teste Técnico • {isLogin ? "Login" : "Cadastro"}
+              </div>
             </div>
           </div>
 
-            <form className="login-form" onSubmit={handleLogin}>
+          <form
+            className="login-form"
+            onSubmit={isLogin ? handleLogin : handleRegister}
+            autoComplete="on"
+          >
+            <div className="field-group">
+              <label>Usuário</label>
+              <input
+                autoComplete="username"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                placeholder="ex: meu_usuario"
+                required
+              />
+            </div>
+
+            {!isLogin && (
               <div className="field-group">
-                <label>Usuário</label>
+                <label>E-mail (opcional)</label>
                 <input
-                  autoComplete="username"
-                  value={username}
-                  onChange={e => setUsername(e.target.value)}
-                  placeholder="ex: teste_01"
-                  required
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="seu@email.com"
                 />
               </div>
+            )}
 
-              <div className="field-group">
-                <label>Senha</label>
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                />
+            <div className="field-group">
+              <label>Senha</label>
+              <input
+                type="password"
+                autoComplete={isLogin ? "current-password" : "new-password"}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+              />
+            </div>
+
+            {formError && (
+              <div className="error-box fade-in">
+                <span style={{ fontWeight: 600 }}>Erro:</span> {formError}
               </div>
+            )}
 
-              {loginError && (
-                <div className="error-box fade-in">
-                  <span style={{ fontWeight: 600 }}>Erro:</span> {loginError}
-                </div>
-              )}
+            <div className="actions-row" style={{ flexWrap: "wrap", gap: 12 }}>
+              <button
+                type="submit"
+                className="primary"
+                disabled={formLoading}
+                style={{ minWidth: 140, justifyContent: "center" }}
+              >
+                {formLoading ? <div className="spinner" /> : (isLogin ? "Entrar" : "Registrar")}
+              </button>
 
-              <div className="actions-row">
-                <button
-                  type="submit"
-                  className="primary"
-                  disabled={loginLoading}
-                  style={{ minWidth: 120, justifyContent: "center" }}
-                >
-                  {loginLoading ? <div className="spinner" /> : "Entrar"}
-                </button>
-                <button
-                  type="button"
-                  className="outline"
-                  onClick={() => {
-                    setUsername("");
-                    setPassword("");
-                    setLoginError(null);
-                  }}
-                >
-                  Limpar
-                </button>
-              </div>
-            </form>
+              <button
+                type="button"
+                className="outline"
+                onClick={() => {
+                  setFormError(null);
+                  setPassword("");
+                  setEmail("");
+                  // alterna modo
+                  setMode(isLogin ? "register" : "login");
+                }}
+                style={{ minWidth: 140, justifyContent: "center" }}
+              >
+                {isLogin ? "Criar conta" : "Já tenho conta"}
+              </button>
+            </div>
+          </form>
 
-            <p className="muted" style={{ marginTop: 28 }}>
-              Use o usuário criado via <code>createsuperuser</code>.  
-              (Depois você pode implementar registro.)
-            </p>
+          <p className="muted" style={{ marginTop: 28 }}>
+            {isLogin
+              ? "Não tem conta? Clique em 'Criar conta'."
+              : "Já tem uma conta? Clique em 'Já tenho conta'."}
+          </p>
         </div>
       </div>
     );
   }
 
-  // --- App (logado) ---
+  // --------- App logado ----------
   return (
     <div style={{ maxWidth: 880, margin: "42px auto", padding: "0 24px" }} className="fade-in">
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
@@ -270,10 +337,20 @@ function App() {
                 display: "flex",
                 flexDirection: "column",
                 gap: 8,
+                opacity: t.is_completed ? 0.8 : 1
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                <strong style={{ fontSize: 15, lineHeight: 1.3 }}>{t.title}</strong>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+                <strong
+                  style={{
+                    fontSize: 15,
+                    lineHeight: 1.3,
+                    textDecoration: t.is_completed ? "line-through" : "none",
+                    color: t.is_completed ? "#9aa4b1" : "var(--text)"
+                  }}
+                >
+                  {t.title}
+                </strong>
                 <span
                   style={{
                     fontSize: 11,
@@ -281,21 +358,51 @@ function App() {
                     letterSpacing: ".5px",
                     color: t.is_completed ? "#7dd97d" : "#ffdf6a",
                     fontWeight: 600,
+                    whiteSpace: "nowrap"
                   }}
                 >
                   {t.is_completed ? "Feita" : "Pendente"}
                 </span>
               </div>
+
               {t.description && (
-                <div style={{ fontSize: 13.5, color: "var(--text-dim)", lineHeight: 1.4 }}>
+                <div
+                  style={{
+                    fontSize: 13.5,
+                    color: "var(--text-dim)",
+                    lineHeight: 1.4,
+                    textDecoration: t.is_completed ? "line-through" : "none"
+                  }}
+                >
                   {t.description}
                 </div>
               )}
+
+              {/* Botões de ação */}
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <button
+                  onClick={() => handleToggle(t)}
+                  style={{
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-alt)",
+                    color: t.is_completed ? "#ffdf6a" : "#7dd97d",
+                    fontSize: 12,
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    cursor: "pointer"
+                  }}
+                >
+                  {t.is_completed ? "Reabrir" : "Concluir"}
+                </button>
+                {/* (Opcional futuro) Botões de editar / deletar podem ir aqui */}
+              </div>
+
               <div style={{ fontSize: 11, color: "#6f7a86", marginTop: "auto" }}>
                 Criada: {new Date(t.created_at).toLocaleString()}
               </div>
             </div>
           ))}
+
         </div>
       </section>
     </div>

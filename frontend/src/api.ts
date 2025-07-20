@@ -67,3 +67,55 @@ export async function login(username: string, password: string) {
   return res.json() as Promise<{ access: string; refresh: string }>;
 }
 
+// --- Registro de usuário ---
+
+export interface RegisterPayload {
+  username: string;
+  password: string;
+  email?: string;
+}
+
+export interface RegisterResponse {
+  user: { id: number; username: string; email: string };
+  access: string;
+  refresh: string;
+}
+
+export async function register(payload: RegisterPayload): Promise<RegisterResponse> {
+  const res = await fetch("http://127.0.0.1:8000/api/register/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    let detail = "";
+    try {
+      detail = await res.text();
+    } catch {
+    }
+    throw new Error(detail || "Falha ao registrar");
+  }
+
+  return res.json();
+}
+
+export async function updateTaskCompletion(
+  token: string,
+  id: number,
+  is_completed: boolean
+) {
+  const res = await fetch(`http://127.0.0.1:8000/api/tasks/${id}/`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ is_completed }),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error("Falha ao atualizar tarefa: " + txt);
+  }
+  return res.json() as Promise<import("./api").Task>;
+}
