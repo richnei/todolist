@@ -1,4 +1,4 @@
-# To‑Do Manager (Teste Técnico)
+# To‑Do Manager
 
 Aplicação full‑stack de gerenciamento de tarefas (**To‑Do List**) construída com **Django + Django REST Framework** no back‑end e **React (Vite + TypeScript)** no front‑end.
 
